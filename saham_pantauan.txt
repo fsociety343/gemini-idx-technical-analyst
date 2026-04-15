@@ -1,0 +1,4 @@
+BBCA
+BBRI
+TLKM
+GOTO
