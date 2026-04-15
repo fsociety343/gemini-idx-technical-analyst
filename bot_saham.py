@@ -5,18 +5,23 @@ from google import genai
 import requests
 import os
 from datetime import datetime
+import time
 
 # ==========================================
-# KONFIGURASI API
+# KONFIGURASI API (Environment Variables)
 # ==========================================
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
+# Inisialisasi Gemini Client versi terbaru
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 def get_safe_value(row, prefix):
-    """Mencari nilai indikator berdasarkan awalan (prefix) agar kebal terhadap perubahan nama kolom."""
+    """
+    Mencari nilai indikator berdasarkan awalan (prefix).
+    Sangat penting karena nama kolom pandas_ta bisa berubah tergantung versi (misal: BBU_20_2.0 vs BBU_20_2).
+    """
     for col in row.index:
         if str(col).startswith(prefix):
             val = row[col]
@@ -26,40 +31,42 @@ def get_safe_value(row, prefix):
 def get_technical_data(ticker):
     """Mengambil data pasar dan menghitung indikator teknikal."""
     try:
+        # 1. Download Data
         stock = yf.Ticker(ticker)
         df = stock.history(period="1y")
         
         if df.empty:
+            print(f"Peringatan: Data untuk {ticker} kosong.")
             return None
 
-        # Fix MultiIndex yfinance
+        # 2. Perbaikan Struktur Kolom (MultiIndex Fix)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
+        
+        # Pastikan nama kolom adalah string murni
         df.columns = [str(col) for col in df.columns]
 
-        # 1. Moving Averages
+        # 3. Kalkulasi Indikator dengan pandas_ta
         df.ta.sma(length=10, append=True)
         df.ta.sma(length=20, append=True)
         df.ta.sma(length=50, append=True)
         df.ta.sma(length=200, append=True)
-
-        # 2. Momentum
         df.ta.rsi(length=14, append=True)
         df.ta.macd(fast=12, slow=26, signal=9, append=True)
         df.ta.bbands(length=20, std=2, append=True)
-
-        # 3. Volume & MFI
+        
+        # Volume Analysis
         df['VOL_SMA_20'] = df['Volume'].rolling(window=20).mean()
         df.ta.mfi(length=14, append=True)
 
-        # 4. Support & Resistance
-        last_3_months = df.tail(60)
-        resistance = last_3_months['High'].max()
-        support = last_3_months['Low'].min()
+        # 4. Support & Resistance (High/Low 3 Bulan Terakhir)
+        last_60_days = df.tail(60)
+        resistance = last_60_days['High'].max()
+        support = last_60_days['Low'].min()
 
         latest = df.iloc[-1]
 
-        # 5. Deteksi Fase Market
+        # 5. Deteksi Fase Market Sederhana
         phase = "Sideways / Konsolidasi 🟡"
         sma10 = get_safe_value(latest, 'SMA_10')
         sma50 = get_safe_value(latest, 'SMA_50')
@@ -71,7 +78,7 @@ def get_technical_data(ticker):
         elif sma10 < sma50 and vol > vol_sma20:
             phase = "Distribusi / Markdown (Bearish) 🔴"
 
-        # Menggunakan pencarian dinamis (get_safe_value) untuk semua indikator rentan
+        # 6. Kompilasi Data Summary untuk AI
         data_summary = {
             "Ticker": ticker,
             "Close Price": round(float(latest['Close']), 2),
@@ -92,12 +99,13 @@ def get_technical_data(ticker):
             "Market_Phase": phase
         }
         return data_summary
+
     except Exception as e:
-        print(f"Error parsing indicators for {ticker}: {e}")
+        print(f"Error saat memproses data teknikal {ticker}: {e}")
         return None
 
 def generate_ai_report(data):
-    """Mengirim data ke Gemini AI."""
+    """Interpretasi data teknikal menggunakan model Gemini terbaru."""
     prompt = f"""
     Bertindaklah sebagai Senior Technical Analyst. Interpretasikan data teknikal berikut menjadi laporan narasi harian untuk trader profesional.
     
@@ -126,47 +134,69 @@ def generate_ai_report(data):
     """
     
     try:
+        # Menggunakan model gemini-2.0-flash (atau versi terbaru yang tersedia)
         response = client.models.generate_content(
             model='gemini-2.0-flash',
             contents=prompt,
         )
         return response.text
     except Exception as e:
-        print(f"Gagal memanggil API Gemini: {e}")
-        return f"Maaf, gagal memproses analisis AI untuk {data['Ticker']}."
+        print(f"Gagal memanggil API Gemini untuk {data['Ticker']}: {e}")
+        return f"Maaf, gagal menghasilkan laporan AI untuk {data['Ticker']} karena kendala teknis API."
 
 def send_telegram_message(message):
-    """Mengirim laporan ke Telegram."""
+    """Mengirim pesan laporan ke Telegram."""
+    if not message:
+        return
+
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": message,
         "parse_mode": "Markdown"
     }
-    response = requests.post(url, json=payload)
-    if response.status_code != 200:
-        print(f"Gagal mengirim pesan ke Telegram: {response.text}")
+    
+    try:
+        response = requests.post(url, json=payload)
+        if response.status_code != 200:
+            print(f"Gagal mengirim ke Telegram: {response.text}")
+    except Exception as e:
+        print(f"Error saat mengirim pesan Telegram: {e}")
 
 def main():
-    print(f"Memulai rutinitas analisis harian: {datetime.now()}")
+    print(f"--- Memulai Rutinitas Analisis Harian: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---")
     
     file_path = "saham_pantauan.txt"
     if not os.path.exists(file_path):
-        print(f"File {file_path} tidak ditemukan.")
+        print(f"Error: File {file_path} tidak ditemukan!")
         return
 
     with open(file_path, "r") as f:
-        tickers = [line.strip().upper() + ".JK" for line in f if line.strip()]
+        # Menghapus whitespace dan menambahkan ekstensi .JK untuk IHSG
+        raw_tickers = [line.strip().upper() for line in f if line.strip()]
+        tickers = [t if t.endswith(".JK") else t + ".JK" for t in raw_tickers]
 
     for ticker in tickers:
         print(f"Menganalisis {ticker}...")
+        
+        # Ambil data teknikal
         tech_data = get_technical_data(ticker)
         
         if tech_data:
+            # Generate laporan AI
             report = generate_ai_report(tech_data)
+            
+            # Kirim ke Telegram
             send_telegram_message(report)
+            print(f"Berhasil mengirim laporan untuk {ticker}")
         else:
-            print(f"Data tidak cukup/gagal diambil untuk {ticker}")
+            print(f"Gagal mendapatkan data teknikal untuk {ticker}")
+
+        # Jeda 15 detik untuk menghindari Rate Limit (429 Resource Exhausted) pada Google API Free Tier
+        print("Menunggu 15 detik sebelum menganalisis saham berikutnya...")
+        time.sleep(15)
+
+    print("--- Semua tugas selesai ---")
 
 if __name__ == "__main__":
     main()
