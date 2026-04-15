@@ -97,6 +97,28 @@ GitHub Actions akan menggunakan file `.github/workflows/daily_report.yml` untuk 
 
 ---
 
+## 🛠️ Roadmap Pengembangan
+
+### Phase 1: Visualisasi & Multi-Dimensi
+
+ - Integrasi Candlestick Chart (Library mplfinance).
+
+ - Analisis Multi-Timeframe (Weekly vs Daily).
+
+### Phase 2: Screener & Fundamental
+
+ - Real-time Market Screener (Auto-scan LQ45/Kompas100).
+
+ - Integrasi Rasio Fundamental (PE Ratio, PBV, Dividend Yield).
+
+### Phase 3: Skalabilitas
+
+ - Win-rate Tracking & Database Performa Sinyal.
+
+ - Web Dashboard UI (Streamlit atau Next.js).
+
+---
+
 ## 🛡️ Disclaimer
 
-Skrip ini dibuat murni untuk tujuan edukasi dan penyediaan informasi kuantitatif. Logika *rule-based* dan opini AI yang dihasilkan bukanlah rekomendasi mutlak. Segala bentuk keputusan investasi atau *trading* sepenuhnya menjadi tanggung jawab pengguna. **Do Your Own Research (DYOR).**
+Tools ini dibuat murni untuk tujuan edukasi dan penyediaan informasi kuantitatif. Logika *rule-based* dan opini AI yang dihasilkan bukanlah rekomendasi mutlak. Segala bentuk keputusan investasi atau *trading* sepenuhnya menjadi tanggung jawab pengguna. **Do Your Own Research (DYOR).**
