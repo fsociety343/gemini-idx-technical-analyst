@@ -1,7 +1,7 @@
 import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
-from google import genai  # <-- Menggunakan SDK Baru
+from google import genai
 import requests
 import os
 from datetime import datetime
@@ -19,12 +19,22 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 def get_technical_data(ticker):
     """Mengambil data pasar dan menghitung indikator teknikal."""
     try:
-        # Perbaikan Error: Menggunakan Ticker().history() menghindari masalah MultiIndex yfinance
+        # Perbaikan Ekstraksi Data
         stock = yf.Ticker(ticker)
         df = stock.history(period="1y")
         
         if df.empty:
             return None
+
+        # ========================================================
+        # PERBAIKAN BULLETPROOF UNTUK ERROR MULTIINDEX YFINANCE
+        # ========================================================
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        
+        # Pastikan nama kolom berformat string (mencegah error pandas_ta)
+        df.columns = [str(col) for col in df.columns]
+        # ========================================================
 
         # 1. Moving Averages
         df.ta.sma(length=10, append=True)
@@ -55,7 +65,7 @@ def get_technical_data(ticker):
         elif latest['SMA_10'] < latest['SMA_50'] and latest['Volume'] > latest['VOL_SMA_20']:
             phase = "Distribusi / Markdown (Bearish) 🔴"
 
-        # Proteksi error NaN jika data terlalu baru (belum 200 hari)
+        # Proteksi error NaN
         ma200_val = 0 if pd.isna(latest['SMA_200']) else float(latest['SMA_200'])
 
         data_summary = {
@@ -112,7 +122,6 @@ def generate_ai_report(data):
     """
     
     try:
-        # Format pemanggilan API GenAI versi terbaru
         response = client.models.generate_content(
             model='gemini-1.5-flash',
             contents=prompt,
@@ -143,7 +152,6 @@ def main():
         return
 
     with open(file_path, "r") as f:
-        # Membaca ticker saham
         tickers = [line.strip().upper() + ".JK" for line in f if line.strip()]
 
     for ticker in tickers:
